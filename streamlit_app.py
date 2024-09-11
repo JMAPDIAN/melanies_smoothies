@@ -13,7 +13,7 @@ st.write('The name on your Smoothie will be:', name_on_order)
 
 # Snowflake session setup
 cnx = st.connection("snowflake")
-session - cnx.session()
+session = cnx.session()
 
 # Retrieve fruit options from Snowflake
 my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME')).collect()
