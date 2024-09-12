@@ -1,5 +1,7 @@
 # Import python packages
 import streamlit as st
+import snowflake.connector
+from snowflake.snowpark import Session
 from snowflake.snowpark.functions import col
 
 # Write directly to the app
@@ -8,39 +10,59 @@ st.write(
     """Choose the fruits you want in your custom Smoothie!
     """)
 
+# Input for the name on the smoothie
 name_on_order = st.text_input('Name on Smoothie:')
 st.write('The name on your Smoothie will be:', name_on_order)
 
-# Snowflake session setup
-cnx = st.connection("snowflake")
-session = cnx.session()
+# Snowflake connection setup
+@st.cache_resource  # Cache the session to avoid repeated logins
+def init_snowflake_connection():
+    conn = snowflake.connector.connect(
+        account='your_account',
+        user='your_user',
+        password='your_password',
+        warehouse='your_warehouse',
+        database='smoothies',
+        schema='public',
+        role='your_role'
+    )
+    return Session.builder.configs(conn).create()
 
-# Retrieve fruit options from Snowflake
-my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME')).collect()
+# Retrieve Snowflake session
+try:
+    session = init_snowflake_connection()
 
-# Convert fruit options to a list for multiselect
-fruit_names = [row['FRUIT_NAME'] for row in my_dataframe]
+    # Retrieve fruit options from Snowflake
+    my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME')).collect()
 
-# Multiselect for ingredients
-ingredients_list = st.multiselect(
-    'Choose up to 5 ingredients:',
-    fruit_names,  # Pass the list of fruit names
-    max_selections=5  # Ensure proper selection limitation
-)
+    # Convert fruit options to a list for multiselect
+    fruit_names = [row['FRUIT_NAME'] for row in my_dataframe]
 
-if ingredients_list:
-    # Create a comma-separated string of ingredients
-    ingredients_string = ', '.join(ingredients_list)
+    # Multiselect for ingredients
+    ingredients_list = st.multiselect(
+        'Choose up to 5 ingredients:',
+        fruit_names,  # Pass the list of fruit names
+        max_selections=5  # Ensure proper selection limitation
+    )
 
-    st.write('Ingredients:', ingredients_string)
+    if ingredients_list:
+        # Create a comma-separated string of ingredients
+        ingredients_string = ', '.join(ingredients_list)
 
-    # SQL insert statement for the new order
-    my_insert_stmt = f"""
-    INSERT INTO smoothies.public.orders (ingredients, name_on_order)
-    VALUES ('{ingredients_string}', '{name_on_order}')
-    """
+        st.write('Ingredients:', ingredients_string)
 
-    # Submit the order
-    if st.button('Submit Order'):
-        session.sql(my_insert_stmt).collect()  # Execute the insert query when button is clicked
-        st.success('Your Smoothie is ordered!', icon="✅")
+        # SQL insert statement for the new order (using parameterized query to prevent SQL injection)
+        insert_query = """
+        INSERT INTO smoothies.public.orders (ingredients, name_on_order)
+        VALUES (%s, %s)
+        """
+
+        # Submit the order
+        if st.button('Submit Order'):
+            try:
+                session.execute(insert_query, [ingredients_string, name_on_order])
+                st.success('Your Smoothie is ordered!', icon="✅")
+            except Exception as e:
+                st.error(f"Error submitting order: {e}")
+except Exception as e:
+    st.error(f"Error connecting to Snowflake: {e}")
